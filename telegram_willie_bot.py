@@ -118,24 +118,29 @@ def send_photo(chat_id, file_id):
 
 # Lógica principal: recebe mensagem, envia pro assistente, responde
 async def process_message(chat_id, user_text):
+    async def process_message(chat_id, user_text):
     async with httpx.AsyncClient() as client:
-        # Criar thread com prompt inicial do especialista
-        thread_resp = await client.post(
+        # Criar thread
+        thread = await client.post(
             OPENAI_API_URL,
             headers=HEADERS,
-            json={
-                "assistant_id": ASSISTANT_ID,
-                "messages": [{"role": "system", "content": EXPERT_PROMPT}]
-            }
+            json={"assistant_id": ASSISTANT_ID}
         )
-        thread_id = thread_resp.json().get("id")
+        print("Thread response:", thread.text)
 
-        # Enviar mensagem do usuário
-        await client.post(
+        thread_id = thread.json().get("id")
+        if not thread_id:
+            print("Erro: thread_id não recebido")
+            send_message(chat_id, "Erro interno: não consegui iniciar a conversa.")
+            return
+
+        # Enviar mensagem para a thread
+        msg_resp = await client.post(
             f"{OPENAI_API_URL}/{thread_id}/messages",
             headers=HEADERS,
             json={"role": "user", "content": user_text}
         )
+        print("Send message response:", msg_resp.text)
 
         # Executar assistente
         run_resp = await client.post(
@@ -143,7 +148,13 @@ async def process_message(chat_id, user_text):
             headers=HEADERS,
             json={"assistant_id": ASSISTANT_ID}
         )
+        print("Run response:", run_resp.text)
+
         run_id = run_resp.json().get("id")
+        if not run_id:
+            print("Erro: run_id não recebido")
+            send_message(chat_id, "Erro interno: não consegui processar a mensagem.")
+            return
 
         # Esperar execução
         for _ in range(10):
@@ -152,6 +163,7 @@ async def process_message(chat_id, user_text):
                 f"{OPENAI_API_URL}/{thread_id}/runs/{run_id}", headers=HEADERS
             )
             status = run_check.json().get("status")
+            print("Run status:", status)
             if status == "completed":
                 break
 
@@ -163,14 +175,13 @@ async def process_message(chat_id, user_text):
         messages = msg_resp.json().get("data", [])
         resposta = "Erro ao responder."
         if messages:
-            # Extrai a resposta do assistente do último conteúdo recebido
             try:
                 resposta = messages[-1]['content'][0]['text']['value']
             except Exception:
                 resposta = messages[-1].get('content', 'Erro ao interpretar resposta.')
 
-        # Envia resposta no Telegram
         send_message(chat_id, resposta)
+
 
 # Rota que recebe atualizações do Telegram
 @app.post("/webhook")
