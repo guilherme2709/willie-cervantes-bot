@@ -118,7 +118,6 @@ def send_photo(chat_id, file_id):
 
 # Lógica principal: recebe mensagem, envia pro assistente, responde
 async def process_message(chat_id, user_text):
-    async def process_message(chat_id, user_text):
     async with httpx.AsyncClient() as client:
         # Criar thread
         thread = await client.post(
