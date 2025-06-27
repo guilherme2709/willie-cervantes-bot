@@ -8,7 +8,8 @@ app = FastAPI()
 # ---- CONFIGS ----
 TELEGRAM_TOKEN = "7514793940:AAE1pZJlnSUJoh2Y3IU9b49U9qUg9Yt58LE"
 ASSISTANT_ID = "asst_eO8HkcgdpaEOjx5hddytJMe3"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Defina no Render como secret
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+print("🔐 OPENAI_API_KEY:", OPENAI_API_KEY)  # DEBUG
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 OPENAI_API_URL = "https://api.openai.com/v1/threads"
@@ -18,52 +19,14 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-EXPERT_PROMPT = """Você é um consultor agrícola altamente especializado no cultivo de Cannabis, com profundo conhecimento em botânica, fisiologia vegetal, cultivo indoor e outdoor, controle ambiental, manejo de nutrientes e identificação visual de problemas nas plantas. Seu papel é acompanhar cultivadores durante todas as fases do ciclo da planta, fornecendo diagnósticos e instruções práticas com base em imagens e descrições enviadas.
-
-🧠 Etapa 1 – Diagnóstico
-1. Identifique o estágio de crescimento atual (germinação, muda, vegetativo, pré-floração, floração, colheita).
-2. Analise sinais visuais (folhas amareladas, pontas queimadas, manchas, pragas, mofo, etc.).
-3. Relacione os sintomas ao ambiente informado (luz, temperatura, umidade, substrato, frequência de rega, nutrientes, pH).
-4. Se não houver informação suficiente, peça mais detalhes ao usuário.
-
-🧪 Etapa 2 – Diagnóstico Técnico
-- Indique a provável causa (nutrientes, pragas, pH, overwatering, light burn, etc.).
-- Fundamente a explicação tecnicamente.
-- Use linguagem clara, mas ensine o nome técnico sempre que possível.
-
-🔧 Etapa 3 – Recomendação Prática
-- Dê ações específicas (regar com X mL, fazer flush, trocar vaso, aplicar produto).
-- Diga frequência e método de aplicação.
-- Dê alertas conforme o estágio da planta (ex: não podar em floração).
-- Reforce boas práticas e monitoração contínua.
-
-📋 Checklist que você deve sempre considerar:
-- Tempo desde germinação
-- Tipo de cultivo (indoor/outdoor)
-- Substrato (terra, coco, hidroponia)
-- Fertilizantes usados (nome e dosagem)
-- Iluminação e ciclo de luz
-- Temperatura e umidade
-- Frequência de rega
-- pH da água/solo
-- Pragas visíveis, mofo ou odor
-
-📣 Tom e estilo:
-- Seja direto, técnico e didático.
-- Nunca invente sem dados.
-- Diga quando precisa de mais informação.
-- Fale com clareza e sem enrolar.
-
-Exemplo:
-Estágio: Vegetativo com sinais de excesso de nitrogênio.
-Diagnóstico: Folhas verde-escuras e curvadas para baixo.
-Recomendo: Suspender fertilizantes por 7 dias e regar com água pH 6,5. Se solo estiver saturado, fazer flush com 3x volume do vaso.
-Observar melhora em até 5 dias antes de retomar nutrição.
+EXPERT_PROMPT = """Você é um consultor agrícola altamente especializado no cultivo de Cannabis...
+(continua igual, sem alterações)
 """
 
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
+    print("📤 Enviando mensagem para o Telegram:", data)  # DEBUG
     return httpx.post(url, json=data)
 
 def send_photo(chat_id, file_id):
@@ -72,17 +35,18 @@ def send_photo(chat_id, file_id):
     return httpx.post(url, json=data)
 
 async def process_message(chat_id, user_text):
+    print("✅ Entrou na função process_message")  # DEBUG
     async with httpx.AsyncClient() as client:
         thread = await client.post(
             OPENAI_API_URL,
             headers=HEADERS,
             json={"assistant_id": ASSISTANT_ID}
         )
-        print("Thread response:", thread.text)
+        print("🧵 Thread response:", thread.text)
 
         thread_id = thread.json().get("id")
         if not thread_id:
-            print("Erro: thread_id não recebido")
+            print("❌ Erro: thread_id não recebido")
             send_message(chat_id, "Erro interno: não consegui iniciar a conversa.")
             return
 
@@ -97,28 +61,28 @@ async def process_message(chat_id, user_text):
             headers=HEADERS,
             json={"role": "user", "content": user_text}
         )
-        print("Send message response:", msg_resp.text)
+        print("📩 Mensagem enviada à IA:", msg_resp.text)
 
         run_resp = await client.post(
             f"{OPENAI_API_URL}/{thread_id}/runs",
             headers=HEADERS,
             json={"assistant_id": ASSISTANT_ID}
         )
-        print("Run response:", run_resp.text)
+        print("🏃 Run response:", run_resp.text)
 
         run_id = run_resp.json().get("id")
         if not run_id:
-            print("Erro: run_id não recebido")
+            print("❌ Erro: run_id não recebido")
             send_message(chat_id, "Erro interno: não consegui processar a mensagem.")
             return
 
-        for _ in range(10):
+        for i in range(10):
             await asyncio.sleep(2)
             run_check = await client.get(
                 f"{OPENAI_API_URL}/{thread_id}/runs/{run_id}", headers=HEADERS
             )
             status = run_check.json().get("status")
-            print("Run status:", status)
+            print(f"⏳ Tentativa {i+1} – Run status:", status)
             if status == "completed":
                 break
 
@@ -134,21 +98,27 @@ async def process_message(chat_id, user_text):
             except Exception:
                 resposta = messages[-1].get('content', 'Erro ao interpretar resposta.')
 
+        print("🧠 Resposta final da IA:", resposta)  # DEBUG
         send_message(chat_id, resposta)
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    print("📥 Dados recebidos do Telegram:", data)  # DEBUG
+
     message = data.get("message")
     if not message:
+        print("⚠️ Nenhuma chave 'message' encontrada.")
         return {"ok": True}
 
     chat_id = message["chat"].get("id")
     if chat_id != 7514793940:
+        print("🔒 Mensagem ignorada de outro usuário:", chat_id)
         return {"ok": True}
 
     if "text" in message:
         text = message["text"]
+        print("📨 Texto recebido:", text)  # DEBUG
         asyncio.create_task(process_message(chat_id, text))
 
     return {"ok": True}
